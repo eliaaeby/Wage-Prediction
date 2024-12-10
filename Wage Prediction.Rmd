@@ -1,0 +1,496 @@
+---
+title: "Wage Prediction"
+author: "Elia Aeby"
+date: "2024-05-22"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+# First Preparation
+
+## Loading the required libraries
+To solve the wage prediction group work we used the following libraries.
+
+```{r loading libraries, message=FALSE, warning=FALSE}
+library(e1071)
+library(tidyverse)
+library(dlookr)
+library(caret)
+library(rsample)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(finalfit)
+library(patchwork)
+library(nnet)
+library(xgboost)
+library(mltools)
+library(reshape2)
+library(pracma)
+library(PRROC)
+library(pROC)
+library(ROCR)
+library(nnet)
+library(neuralnet)
+library(Boruta)
+library(readxl)
+library(SHAPforxgboost)
+library(shapviz)
+library(ggplot2)
+library(shapper)
+library(data.table)
+set.seed(123) # Set random seed to make results reproducible
+```
+
+## Import the Data
+
+```{r import of the Data Set, warning=FALSE, message=FALSE }
+load("data_wage.RData")
+
+# Copying the data for safety
+data_wage <- data
+```
+
+# Understanding the Data Set
+
+The initial step in our analysis is to thoroughly understand the available data by examining various statistical key figures and creating diverse visualizations. This also allows us to assess the quality of the data. Utilizing the 'overview' function reveals that our dataset comprises 10,809 observations and 78 different variables. Notably, the dataset is complete with no missing observations, variables, or values, and there are no duplicate entries, indicating high data quality.
+
+```{r missing_values, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+# Checking for missing values
+missing_values <- colSums(is.na(data))
+print(missing_values)
+```
+
+```{r overview, warning=FALSE, message=FALSE, echo=TRUE}
+# To get an overview of the data
+overview(data)
+```
+
+```{r structure, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+# To get a more detailed feel of the data
+str(data)
+```
+
+The analysis highlights that 64 out of the 78 variables are classified as numeric, primarily due to one-hot encoding, which converts categorical variables into binary ones. Each of these binary variables represents a category, with a value of 1 indicating the presence of the category and 0 indicating its absence. This conversion explains the high number of numeric variables in the dataset.
+
+To understand the data that we are working with even further, let's have a look at the variables.
+
+```{r not_encoding_data, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+plain_data <- data[, -c(10:39, 41:56, 61:77)]
+summary(plain_data)
+```
+
+# Survey Demographics and Insights
+
+## Gender and Age Distribution
+The survey data reveals a significant gender disparity, with notably more men (9,135) participating compared to women (1,571). Additionally, the age distribution shows that most respondents are between 25 and 29 years old.
+
+## Geographic and Educational Background
+Geographically, the majority of participants are from the United States (2,505), followed by India (1,576) and China (563). In terms of education, the dataset indicates a high level of academic achievement, with the majority holding a Master's degree (5,209), followed by Bachelor's degrees (2,990) and doctorates (1,869). This suggests a well-educated respondent pool.
+
+## Professional Background and Technical Skills
+The most common undergraduate majors are computer science (4,239) and engineering (1,704), highlighting a strong technical background among respondents. Predominant job roles include Data Scientist (2,505) and Software Engineer (1,800), further underscoring the technical nature of their work. The most represented industries are computer technology (3,032) and education (1,317). Most participants have between 0 to 1 years (2,604) and 1 to 2 years (1,974) of experience, indicating relatively recent entry into the workforce.
+
+## Machine Learning and Coding Proficiency
+Regarding machine learning, the majority of respondents are either gradually integrating ML methods into their work or are just beginning this process. A significant number of participants spend 50% to 74% of their time coding (3,458). Many have 1-2 years (3,030) and 3-5 years (2,700) of experience in coding for data analysis. Additionally, a large portion has less than 1 year of experience using ML methods (3,306), indicating a growing interest. Most respondents identify themselves as data scientists with a high degree of confidence. Python emerges as the most frequently used programming language (5,754), followed by R (1,500) and SQL (973), reflecting their central role in data science.
+
+## One Hot Encoding
+Now that we know a lot more about our data we use one hot encoding to start working with the data.
+
+```{r encoding_data, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+encoding_data <- data[, c(10:39, 41:56, 61:77)]
+data_scroll <- pivot_longer(encoding_data, cols = everything(), names_to = "Variable", values_to = "Wert")
+
+sum_data <- data_scroll |>
+  filter(Wert == 1) |>
+  group_by(Variable) |>
+  summarise(Anzahl = n())
+```
+
+# Key Insights from Survey Data
+
+## Important Work Activities
+The survey indicates that the majority of respondents focus on analyzing data to support business decisions, underscoring the critical role of data comprehension in professional settings. Additionally, the development and maintenance of machine learning services and data infrastructures are essential tasks, highlighting the practical application of ML in operations. While innovative activities such as prototyping and research in machine learning are less common, they remain significant for a notable portion of respondents.
+
+## Tools and Technologies
+Kaggle Kernels is the most frequently used notebook platform, with 3,605 mentions, followed by JupyterHub Binder (2,998 mentions) and Google Colab (2,101 mentions). This popularity points to the convenience and integrated tools these platforms offer. However, a substantial number of respondents (4,103) reported not using any of the listed hosted notebooks. Regarding cloud computing services, Amazon Web Services (AWS) leads with 4,968 mentions, followed by Google Cloud Platform (GCP) with 2,979 mentions and Microsoft Azure with 2,517 mentions, though 3,469 respondents had not used any cloud services in the past five years.
+
+## Programming and Machine Learning
+Python stands out as the most commonly used programming language, with 9,547 mentions, emphasizing its dominance in the tech industry. SQL (5,921 mentions) and R (4,548 mentions) are also widely used, reflecting their importance in data manipulation and statistical analysis. In machine learning frameworks, Scikit-Learn is the most utilized (7,588 mentions), followed by TensorFlow (6,162 mentions) and Keras (5,060 mentions). The high usage of Xgboost (3,586 mentions) and RandomForest (3,764 mentions) underscores the popularity of decision tree frameworks.
+
+## Data Visualization and Types
+Matplotlib is the most used data visualization tool with 8,101 mentions, followed by ggplot2 (5,122 mentions) and Plotly (3,710 mentions). Shiny, for building interactive web applications from R, had 1,921 mentions. The majority of respondents work with numerical data (6,850 mentions) and textual data (5,428 mentions). Time series data is also popular (5,079 mentions), and categorical data was mentioned by 5,213 respondents, indicating its widespread use for classification and grouping.
+
+## Methods for Interpreting ML Models
+Examining the importance of features is the preferred method for explaining ML model decisions, with 4,021 responses, highlighting its value in understanding model behavior. Exploring feature correlations (3,642 mentions) is also important, while model coefficients, SHAP functions, and partial dependence plots are used to a lesser extent.
+
+## Target Variable - Wage
+The 'wage' variable reveals a right-skewed distribution, typical of income data. The smallest wage value is 0, indicating some respondents have no income. The first quartile is USD 6,811, meaning 25% of the sample earns this amount or less. The median wage is USD 34,780, and the mean wage is USD 53,048, higher than the median, suggesting a few high-income outliers. The third quartile is USD 75,687, and the maximum income is USD 551,774. The histogram shows most data points in the lower income ranges, with a long tail extending to higher incomes, indicating fewer individuals with significantly higher wages.
+
+```{r target variable, warning=FALSE, message=FALSE, echo=FALSE, fig.width=10, fig.height=6}
+# Have a look at the specs of the target variable
+summary(data$wage)
+
+# Plot the target variable
+ggplot(data, aes(x = wage / 1000)) +
+  geom_histogram(binwidth = 10, fill = "skyblue", color = "black") +
+  scale_x_continuous(breaks = seq(floor(min(data$wage / 1000)), ceiling(max(data$wage / 1000)), by = 50),
+                     labels = function(x) x * 1) +
+  scale_y_continuous(breaks = seq(0, 2000, by = 200)) +
+  theme_minimal(base_size = 20) +
+  labs(
+    title = "Wage Histogram", 
+    x = "Annual income in 1000s USD", 
+    y = "Frequency"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 30),
+    axis.title.x = element_text(size = 24),
+    axis.title.y = element_text(size = 24),
+    axis.text.x = element_text(size = 20),
+    axis.text.y = element_text(size = 20)
+  )
+
+```
+
+## Data adjustment
+To develop various models effectively, it is essential to work with numerical or scaled data. Therefore, the remaining data that has not yet been processed using one-hot encoding is converted accordingly, and the "wage" variable is also scaled. These adjustments ensure that the data sets can be consistently and effectively used across different models. Standardizing the database is crucial for achieving consistent and comparable results for all models. To verify the data transformation, the first six variables of the first six observations are displayed. The display confirms that all variables have been transformed using the one-hot encoding method and are now of the numeric data type, allowing all models to work with the data seamlessly. Additionally, a summary of the "wage" variable shows that the mean has been scaled to 0, and the range between the minimum and maximum values is small, indicating successful scaling. Furthermore, an overlapping density distribution plot of the variable 'wage' is presented for both datasets. This plot allows us to assess the consistency of the income distribution between the training and test datasets. The congruence of the density curves confirms a similar distribution structure of the two datasets, underlining the validity of the data split. Such congruence is essential to ensure the transferability of findings from the training dataset to the test dataset.
+
+```{r transformation and data scaling, warning=FALSE, message=FALSE}
+# Store mean and standard deviation for later rescaling
+wage_mean <- attr(scale(data$wage), "scaled:center")
+wage_sd <- attr(scale(data$wage), "scaled:scale")
+
+# Initialize random seed for reproducibility
+set.seed(123) 
+
+# Create a function for one-hot encoding
+dummy <- dummyVars(" ~ .", data = data)
+
+# Apply one-hot encoding to the dataset
+data <- data.frame(predict(dummy, newdata = data))
+
+# Normalize the "wage" column
+data$wage <- scale(data$wage)
+
+# Convert "wage" column to numeric type
+data$wage <- as.numeric(data$wage)
+
+# Initialize random seed for reproducibility
+set.seed(39) 
+
+split  <- initial_split(data, prop = 0.7)
+data_train  <- training(split)
+data_test   <- testing(split)
+```
+
+Now that we have adjusted the data and split it in to training and testing data, let's have a look at it.
+
+```{r visualisation, warning=FALSE, message=FALSE, echo=FALSE, fig.width=10, fig.height=6}
+cat("Training data:", nrow(data_train)/nrow(data)*100, "%\n")
+cat("Test data:", nrow(data_test)/nrow(data)*100, "%\n")
+
+# Pie chart of Test and training data
+# Create a data frame for the plot
+data_summary <- data.frame(
+  dataset = factor(c("Training data", "Test data")),
+  numberoflines = c(nrow(data_train), nrow(data_test))
+)
+
+# Calculate percentages
+data_summary <- data_summary %>%
+  mutate(percentage = numberoflines / sum(numberoflines) * 100)
+
+# Generate the pie chart
+ggplot(data_summary, aes(x = "", y = percentage, fill = dataset)) +
+  geom_bar(width = 1, stat = "identity", show.legend = TRUE) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            position = position_stack(vjust = 0.5), color = "black", size = 6) +
+  scale_fill_manual(values = c("Training data" = "skyblue", "Test data" = "orange")) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 30),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    panel.grid = element_blank(),
+    legend.title = element_text(size = 20),
+    legend.text = element_text(size = 16)
+  ) +
+  labs(title = "Training vs. Testing Data")
+
+
+# Histogram of the training and test data
+ggplot() +
+  geom_histogram(data = data_train, aes(x = wage, fill = 'Training Data'), bins = 30, position = 'identity') +
+  geom_histogram(data = data_test, aes(x = wage, fill = 'Test Data'), bins = 30, position = 'identity',) +
+  scale_fill_manual(values = c('Training Data' = 'skyblue', 'Test Data' = 'orange')) +
+  scale_x_continuous(breaks = seq(min(data_test$wage), max(data_test$wage), by = 50000)) +
+  theme_minimal() +
+  labs(
+    title = "Training and Testing Data Histogram",
+    x = "Annual income in USD",
+    y = "Count",
+    fill = "Dataset"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 30),
+    axis.title.x = element_text(size = 24),
+    axis.title.y = element_text(size = 24),
+    axis.text.x = element_text(size = 20),
+    axis.text.y = element_text(size = 20),
+    legend.title = element_text(size = 20),
+    legend.text = element_text(size = 16)
+  )
+
+```
+
+# Using predictive models
+
+Four wage prediction models were developed and trained, with the "Finding the best model" chapter dedicated to comparing their accuracy using Root Mean Square Error (RMSE). This comparison is critical because lower RMSE signifies better prediction – a crucial factor for any wage prediction model.
+
+## Linear regression
+Our first model, a linear regression, excels at uncovering the relationship between a dependent variable (like the wage) and one or more independent variables (factors affecting the wage). It achieves this by fitting a linear equation to the data we have. Think of it as drawing a best-fitting straight line through all the data points.  Each prediction is based on a weighted sum of these independent variables, where the weights are like dials we adjust during training to minimize the difference between the predicted and actual values. In simpler terms, the model learns the best combination of these factors to estimate wages accurately.
+
+```{r linear_regression, warning=FALSE, message=FALSE}
+# Linear regression model
+linear <- lm(wage ~ ., data = data_train)
+
+# Create prediction using linear regression
+linear_prediction <- linear |> predict(data_test)
+```
+
+## XGBoost
+As our second model, Extreme Gradient Boosting (XGBoost) takes a different approach. It leverages a technique called gradient boosting, which essentially builds a series of decision trees one after another. Each new tree aims to correct the mistakes of the previous ones by focusing on the areas where the prior models struggled. It achieves this by employing a gradient descent algorithm, which helps it minimize the overall error in predictions. In simpler terms, XGBoost builds on the learnings from prior models to create an ensemble that is more accurate and robust.
+
+```{r xgboost, warning=FALSE, message=FALSE, results='hide'}
+# XGBoost model
+xgb <- xgboost(
+  data = as.matrix(data_train[, -261]), # excluding the target variable
+  label = data_train$wage,
+  objective = "reg:squarederror",
+  nrounds = 300,
+  booster = "gbtree",
+  objective = "reg:squarederror",
+  eta = 0.1,
+  max_depth = 5,
+  min_child_weight = 1,
+  subsample = 0.5,
+  colsample_bytree = 0.5
+)
+
+# Create prediction using XGBoost
+xgb_prediction <- predict(xgb, as.matrix(data_test[, -261]))
+
+# XGBoost evaluation
+xgb_mse <- mean((xgb_prediction - data_test$wage)^2)
+xgb_rmse <- sqrt(xgb_mse)
+```
+
+## SVM
+For our third model, we turn to Support Vector Machines (SVMs). Unlike linear regression, SVMs don't create a straight line to separate the data. Instead, they find the widest possible "gap" between the classes in our training data. This gap is called a hyperplane.  While tuning SVMs to achieve the absolute best hyperplane can be very time-consuming, we opted for a less intensive approach in this project to balance training speed with good prediction results.
+
+```{r, svm, warning=FALSE, message=FALSE}
+# SVM model
+svm <- svm(wage~ ., data = data_train, kernel = "linear", cost = 1)
+
+# Create prediction using SVM
+svm_prediction <- predict(svm, newdata = data_test)
+
+# SVM evaluation
+svm_mse <- mean((svm_prediction - data_test$wage)^2)
+svm_rmse <- sqrt(svm_mse)
+```
+
+## Neural Network
+Our fourth model is a neural network. Inspired by the brain, it uses interconnected processing units to find hidden patterns in the data. Imagine tiny processors working together to unveil complex relationships, making neural networks powerful for wage prediction.
+
+```{r neuralnetwork, warning=FALSE, message=FALSE}
+# Specifying the grid values
+grid <- expand.grid(.decay = c(0.5, 0.1), .size = c(5, 6, 7))
+
+# Neural Network model
+nn <- train(wage ~ ., data = data_train, method = "nnet", maxit = 20, tuneGrid = grid, trace = F, linout = 1, MaxNWts=2000)
+
+# Create prediction using Neural Network
+nn_prediction <- predict(nn, newdata = data_test)
+
+# Neural Network evaluation
+nn_mse <- mean((nn_prediction - data_test$wage)^2)
+nn_rmse <- sqrt(nn_mse)
+```
+
+# Finding the best model
+
+In order to identify the model best suited for wage prediction, we employed Root Mean Square Error (RMSE) as our evaluation metric. A lower RMSE value indicates predictions closer to actual wages, translating to higher model accuracy. Following a meticulous evaluation of each model's RMSE, the XGBoost model distinguished itself with the lowest error rate. This exceptional performance in minimizing prediction error underscores XGBoost's superior capability in estimating future wages. Consequently, XGBoost will be our primary model for wage prediction throughout the remainder of this project.
+
+```{r comparing models, warning=FALSE, message=FALSE}
+cat("Linear Regression model RMSE:", RMSE(linear_prediction, data_test$wage))
+cat("XGBoost model RMSE:", (xgb_rmse))
+cat("SVM model RMSE:", (svm_rmse))
+cat("Neural Network model RMSE:", (nn_rmse))
+```
+
+## Why Understanding Our Model Matters
+Transparency in AI models, especially those impacting real-world decisions like wage prediction, is crucial.  Understanding the factors influencing the model's predictions fosters trust and allows stakeholders to identify potential biases.  In our wage prediction model, interpretability helps guide policy decisions and improve data collection.
+
+```{r importance_plotting, warning=FALSE, message=FALSE, fig.width=14, fig.height=10, out.width='100%', out.height='100%'}
+# Extract feature importance from the model
+importance_matrix <- xgb.importance(model = xgb)
+importance_matrix <- importance_matrix[1:20,]  # Select the top 20 features
+
+# Convert to data frame for the plot
+importance_df <- as.data.frame(importance_matrix)
+
+# Function to wrap text
+wrap_it <- function(x, len = 20) {
+  str_wrap(x, width = len)
+}
+
+# Apply text wrapping to the 'Feature' column
+importance_df$Feature <- sapply(importance_df$Feature, wrap_it)
+
+# Plot the feature importance with a gradient color theme using ggplot2
+ggplot(importance_df, aes(x = reorder(Feature, Gain), y = Gain, fill = Gain)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_gradient(low = "yellow", high = "red") +
+  coord_flip() +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+    axis.title.x = element_text(size = 16, face = "bold"),
+    axis.title.y = element_text(size = 16, face = "bold"),
+    axis.text.x = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    legend.position = "none"
+  ) +
+  labs(title = "Top 20 Feature Importance", x = "Features", y = "Relative Importance")
+
+
+```
+
+## Feature Importance Unveils Key Drivers
+Feature importance analysis, using the XGBoost library, sheds light on which variables hold the most weight in predicting wages. Here, we delve into the most impactful factors:
+
+### Country and Job Role
+Being from the United States and working as a student are the most significant influences. This suggests potential income disparities across regions and job types.
+
+### Experience Matters
+Features like "Models in production for more than 2 years" and experience categories for code and methods highlight the value of experience in wage determination.
+
+### Age and Location
+Age groups consistently appear, indicating a correlation between age and predicted wages. Additionally, working in specific countries like Switzerland and India is influential. This information can be valuable for understanding wage variations across demographics and geographies.
+
+### Beyond Technical Skills
+Features like "Reapplying machine learning to new areas" and "Personally improves my product or workflows" suggest a proactive and adaptable skillset can influence wages. This emphasizes the growing importance of soft skills in the workforce.
+
+## SHAP
+
+```{r shap, warning=FALSE, message=FALSE, fig.width=14, fig.height=7, out.width='100%', out.height='100%'}
+# Convert data frames to matrices, excluding the last column 'wage'
+Training_data_matrix <- data.matrix(data_train[, -ncol(data_train)])
+Test_data_matrix <- data.matrix(data_test[, -ncol(data_test)])
+
+# Calculate SHAP values for the training data using the xgboost model
+shap_values <- shap.values(xgb_model = xgb, X_train = Training_data_matrix)
+shap_contrib <- shap_values$shap_score
+
+# Compute the mean absolute SHAP values for each feature
+mean_abs_shap <- apply(shap_contrib, 2, function(x) mean(abs(x)))
+
+# Select the indices of the top 20 features based on SHAP importance
+top_20_indices <- order(mean_abs_shap, decreasing = TRUE)[1:20]
+top_20_features <- colnames(Training_data_matrix)[top_20_indices]
+
+# Filter SHAP contributions to include only the top 20 features
+filtered_shap_contrib <- shap_contrib[, ..top_20_indices, drop = FALSE]
+
+# Prepare data for the SHAP summary plot
+shap_long <- shap.prep(shap_contrib = filtered_shap_contrib, X_train = Training_data_matrix[, top_20_indices, drop = FALSE])
+
+# Generate and customize the SHAP summary plot for the top 20 features
+shap.plot.summary(shap_long) +
+  scale_color_gradient(low = "yellow", high = "red") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+    axis.title.x = element_text(size = 16, face = "bold"),
+    axis.title.y = element_text(size = 16, face = "bold"),
+    axis.text.x = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold")
+  ) +
+  labs(title = "SHAP Summary", x = "Model output impacted by SHAP values", y = "Features")
+```
+
+The SHAP summary plot offers a window into the model's inner workings. Each dot on this visualization represents a feature's influence on a specific wage prediction, with positive values (to the right) pushing the prediction higher and negative values (to the left) pulling it lower. The color gradient (Red to yellow) further reveals the feature's value for that instance, with yellow indicating low and Red indicating high. This allows us to understand how different factors interact to shape the model's predictions. Let's take a look at the key drivers influencing our wage prediction.
+
+Geographic Disparity
+"country_United.States.of.America" emerges as the top feature, highlighting potential income disparities across geographical regions. This finding warrants further investigation.
+
+Job Role and Age
+Features like "job_role_Student" and "age_22.24" indicate that being a student and belonging to the 22-24 age group tend to increase predicted wages.
+
+Industry and Experience
+The model considers industry (e.g., "industry_I.am.a.student", "industry_Academics.Education") and experience ("years_experience_5.11") as significant factors.
+
+Technical Background and Skills 
+"cloud_Amazon.Web.Services.AWS" and activity-related features ("Activities_Build.prototypes") suggest a technical background and specific activities can influence predictions.
+
+Global Landscape
+Beyond the USA, countries like India, the UK, Canada, and Australia also exert a substantial influence, reflecting the model's sensitivity to geographic variations.
+
+Coding and Machine Learning Expertise
+Features related to coding experience and applying machine learning methods ("percent_actively.coding.1.to.25..of.my.time", "ML_atwork_Yes") showcase the importance of these skills in shaping wage predictions.
+
+
+# Future wages
+
+Predicting the future wages of our group members.
+
+## Loading and preparing the group members data 
+
+```{r prediction_preperation, warning=FALSE, message=FALSE }
+# Prep
+group_members_data <- read_excel("group-members_data.xlsx")
+
+# Convert the new dataset to a matrix (excluding the target variable column, assuming it doesn't exist in new_data)
+group_data_matrix <- as.matrix(group_members_data)
+```
+
+## Function to make the prediction 
+
+```{r wage_prediction, warning=FALSE, message=FALSE}
+predicting_wage <- function(row_data, model_xgb, wage_sd, wage_mean, name) {
+  row_matrix <- as.matrix(row_data)
+  predicted_wage <- predict(xgb, row_matrix) * wage_sd + wage_mean
+  cat("The predicted wage of", name, "is:", predicted_wage, "\n")
+}
+```
+
+## Our future wages predicted
+
+```{r future_wages, warning=FALSE, message=FALSE, echo=FALSE, fig.width=7}
+# Predicting the future wage of Elia
+elia_data <- group_members_data[1, , drop = FALSE]
+elia_wage <- predicting_wage(elia_data, xgb, wage_sd, wage_mean, "Elia")
+
+# Predicting the future wage of Fidan
+fidan_data <- group_members_data[2, , drop = FALSE]
+fidan_wage <- predicting_wage(fidan_data, xgb, wage_sd, wage_mean, "Fidan")
+
+# Predicting the future wage of Lenny
+lenny_data <- group_members_data[3, , drop = FALSE]
+lenny_wage <- predicting_wage(lenny_data, xgb, wage_sd, wage_mean, "Lenny")
+
+# Predicting the future wage of Sebastian
+sebi_data <- group_members_data[4, , drop = FALSE]
+sebi_wage <- predicting_wage(sebi_data, xgb, wage_sd, wage_mean, "Sebastian")
+
+# Predicting the future wage of Marc
+marc_data <- group_members_data[5, , drop = FALSE]
+marc_wage <- predicting_wage(marc_data, xgb, wage_sd, wage_mean, "Marc")
+```
